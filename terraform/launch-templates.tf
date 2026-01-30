@@ -47,7 +47,7 @@ resource "aws_launch_template" "blue" {
 
     # Clone repo (only if not exists)
     if [ ! -d "blue-green-deployment" ]; then
-      git clone https://github.com/anupsharma123/blue-green-deployment.git
+      git clone https://github.com/anupsharma329/blue-green-deployment.git
     fi
 
     cd blue-green-deployment/app/blue
@@ -127,7 +127,7 @@ resource "aws_launch_template" "green" {
 
     # Clone repo (only if not exists)
     if [ ! -d "blue-green-deployment" ]; then
-      git clone https://github.com/anupsharma123/blue-green-deployment.git
+      git clone https://github.com/anupsharma329/blue-green-deployment.git
     fi
 
     cd blue-green-deployment/app/blue
