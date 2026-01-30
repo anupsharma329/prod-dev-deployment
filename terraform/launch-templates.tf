@@ -70,7 +70,7 @@ resource "aws_launch_template" "blue" {
     [Service]
     Type=simple
     User=ubuntu
-    WorkingDirectory=/home/ubuntu/blue-green-deployment/app/green
+    WorkingDirectory=/home/ubuntu/blue-green-deployment/app/blue
     ExecStart=/usr/bin/node app.js
     Restart=always
     RestartSec=5
@@ -150,7 +150,7 @@ resource "aws_launch_template" "green" {
     [Service]
     Type=simple
     User=ubuntu
-    WorkingDirectory=/home/ubuntu/blue-green-deployment/app/blue
+    WorkingDirectory=/home/ubuntu/blue-green-deployment/app/green
     ExecStart=/usr/bin/node app.js
     Restart=always
     RestartSec=5
