@@ -1,0 +1,66 @@
+# ALTERNATIVE: If Ubuntu AMI lookup fails, use Amazon Linux 2 instead
+# This is more reliable across all AWS regions
+# To use this: 
+# 1. Rename this file to launch-templates.tf (backup current one first)
+# 2. Update user_data to use yum instead of apt-get
+
+data "aws_ami" "amazon_linux2" {
+  most_recent = true
+  owners      = ["amazon"]
+  
+  filter {
+    name   = "name"
+    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+  }
+  
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
+resource "aws_launch_template" "blue" {
+  name_prefix   = "blue-template-"
+  image_id      = data.aws_ami.amazon_linux2.id
+  instance_type = "t2.micro"
+
+  vpc_security_group_ids = [aws_security_group.app.id]
+
+  user_data = base64encode(<<-EOF
+    #!/bin/bash
+    set -e
+    yum update -y
+    curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
+    yum install -y nodejs git
+
+    cd /home/ec2-user
+    git clone https://github.com/anupsharma123/blue-green-deployment.git
+    cd blue-green-deployment/app/blue
+    npm install
+    npm start
+  EOF
+  )
+}
+
+resource "aws_launch_template" "green" {
+  name_prefix   = "green-template-"
+  image_id      = data.aws_ami.amazon_linux2.id
+  instance_type = "t2.micro"
+
+  vpc_security_group_ids = [aws_security_group.app.id]
+
+  user_data = base64encode(<<-EOF
+    #!/bin/bash
+    set -e
+    yum update -y
+    curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
+    yum install -y nodejs git
+
+    cd /home/ec2-user
+    git clone https://github.com/anupsharma123/blue-green-deployment.git
+    cd blue-green-deployment/app/green
+    npm install
+    npm start
+  EOF
+  )
+}
