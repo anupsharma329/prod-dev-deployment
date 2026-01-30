@@ -29,7 +29,7 @@ resource "aws_launch_template" "blue" {
 
   user_data = base64encode(<<-EOF
     #!/bin/bash
-    exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+    exec > /var/log/user-data.log 2>&1
     set -e
     apt-get update -y
     apt-get install -y curl git
@@ -41,7 +41,7 @@ resource "aws_launch_template" "blue" {
     npm install
     sed -i "s/}).listen(3000);/}).listen(3000, '0.0.0.0');/" app.js || true
     chown -R ubuntu:ubuntu /home/ubuntu/blue-green-deployment
-    cat > /etc/systemd/system/nodeapp.service << 'SVC'
+    sudo tee /etc/systemd/system/nodeapp.service > /dev/null << 'SVC'
 [Unit]
 Description=Node.js Blue App
 After=network-online.target
@@ -74,7 +74,7 @@ resource "aws_launch_template" "green" {
 
   user_data = base64encode(<<-EOF
     #!/bin/bash
-    exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+    exec > /var/log/user-data.log 2>&1
     set -e
     apt-get update -y
     apt-get install -y curl git
@@ -86,7 +86,7 @@ resource "aws_launch_template" "green" {
     npm install
     sed -i "s/}).listen(3000);/}).listen(3000, '0.0.0.0');/" app.js || true
     chown -R ubuntu:ubuntu /home/ubuntu/blue-green-deployment
-    cat > /etc/systemd/system/nodeapp.service << 'SVC'
+    sudo tee /etc/systemd/system/nodeapp.service > /dev/null << 'SVC'
 [Unit]
 Description=Node.js Green App
 After=network-online.target
