@@ -60,7 +60,7 @@ resource "aws_launch_template" "prod" {
     git checkout "$${BRANCH}"
     git reset --hard "origin/$${BRANCH}"
 
-    cd prod-dev-deployment/app
+    cd /home/ubuntu/prod-dev-deployment/app
 
     # Fix ownership BEFORE npm
     chown -R ubuntu:ubuntu /home/ubuntu/prod-dev-deployment/app
@@ -146,7 +146,7 @@ resource "aws_launch_template" "dev" {
     git checkout "$${BRANCH}"
     git reset --hard "origin/$${BRANCH}"
 
-    cd prod-dev-deployment/app
+    cd /home/ubuntu/prod-dev-deployment/app
 
     # Fix ownership BEFORE npm
     chown -R ubuntu:ubuntu /home/ubuntu/prod-dev-deployment/app
