@@ -5,6 +5,6 @@ resource "aws_lb_listener" "http" {
 
   default_action {
     type             = "forward"
-    target_group_arn = var.active_target == "blue" ? aws_lb_target_group.blue.arn : aws_lb_target_group.green.arn
+    target_group_arn = var.active_target == "prod" ? aws_lb_target_group.prod.arn : aws_lb_target_group.dev.arn
   }
 }

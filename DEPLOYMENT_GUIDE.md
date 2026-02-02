@@ -1,6 +1,6 @@
 # Deployment Guide
 
-Complete step-by-step guide for deploying the Blue-Green infrastructure on AWS.
+Complete step-by-step guide for deploying the prod-dev infrastructure on AWS.
 
 ---
 
@@ -71,8 +71,8 @@ aws s3api put-bucket-versioning \
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/blue-green-deployment.git
-cd blue-green-deployment
+git clone https://github.com/your-username/prod-dev-deployment.git
+cd prod-dev-deployment
 ```
 
 ### Step 2: Create Backend Configuration
@@ -81,7 +81,7 @@ Create `terraform/backend.hcl` (this file is gitignored):
 
 ```hcl
 bucket = "your-terraform-state-bucket"
-key    = "blue-green/terraform.tfstate"
+key    = "prod-dev/terraform.tfstate"
 region = "us-east-1"
 ```
 
@@ -104,23 +104,23 @@ Terraform has been successfully initialized!
 ### Step 4: Review the Plan
 
 ```bash
-terraform plan -var="active_target=blue"
+terraform plan -var="active_target=prod"
 ```
 
 **What you'll see:**
 - VPC and networking resources
 - Security groups (alb-sg, app-sg)
 - Application Load Balancer
-- Target groups (blue-tg, green-tg)
-- Launch templates (blue-template, green-template)
-- Auto Scaling Groups (blue-asg, green-asg)
+- Target groups (prod-tg, dev-tg)
+- Launch templates (prod-template, dev-template)
+- Auto Scaling Groups (prod-asg, dev-asg)
 
 **Expected:** `Plan: 18 to add, 0 to change, 0 to destroy`
 
-### Step 5: Apply (Deploy Blue Environment)
+### Step 5: Apply (Deploy prod Environment)
 
 ```bash
-terraform apply -var="active_target=blue"
+terraform apply -var="active_target=prod"
 ```
 
 Type `yes` when prompted.
@@ -146,7 +146,7 @@ app_url = "http://main-alb-123456789.us-east-1.elb.amazonaws.com"
 curl $(terraform output -raw app_url)
 ```
 
-**Expected:** HTML response with "Blue Environment"
+**Expected:** HTML response with "prod Environment"
 
 ---
 
@@ -169,18 +169,18 @@ Add these secrets:
 
 ```bash
 git add .
-git commit -m "Initial blue-green deployment setup"
+git commit -m "Initial prod-dev deployment setup"
 git push origin main
 ```
 
 ### Step 3: Run the Workflow
 
 1. Go to **Actions** tab in GitHub
-2. Select **Blue-Green Deployment** workflow
+2. Select **prod-dev Deployment** workflow
 3. Click **Run workflow**
 4. Select target environment:
-   - **blue** - Deploy to blue environment
-   - **green** - Deploy to green environment
+   - **prod** - Deploy to prod environment
+   - **dev** - Deploy to dev environment
 5. Click **Run workflow**
 
 ### Step 4: Monitor the Workflow
@@ -207,37 +207,37 @@ After successful completion, check the workflow logs for:
 
 ### Understanding the Switch
 
-When you switch from blue to green (or vice versa):
+When you switch from prod to dev (or vice versa):
 
-| What Changes | Blue Active | Green Active |
+| What Changes | prod Active | dev Active |
 |--------------|-------------|--------------|
-| Listener forwards to | blue-tg | green-tg |
-| blue-asg desired_capacity | 1 | 0 |
-| green-asg desired_capacity | 0 | 1 |
-| Traffic goes to | Blue instances | Green instances |
+| Listener forwards to | prod-tg | dev-tg |
+| prod-asg desired_capacity | 1 | 0 |
+| dev-asg desired_capacity | 0 | 1 |
+| Traffic goes to | prod instances | dev instances |
 
 ### Switch via CLI (Local)
 
 ```bash
 cd terraform
 
-# Current: Blue is active
-# Switch to Green
-terraform apply -var="active_target=green"
+# Current: prod is active
+# Switch to dev
+terraform apply -var="active_target=dev"
 ```
 
 **What happens:**
-1. Listener rule changes to forward to `green-tg`
-2. `green-asg` scales from 0 → 1 (launches instance)
-3. `blue-asg` scales from 1 → 0 (terminates instance)
+1. Listener rule changes to forward to `dev-tg`
+2. `dev-asg` scales from 0 → 1 (launches instance)
+3. `prod-asg` scales from 1 → 0 (terminates instance)
 4. New instance takes ~3-5 minutes to become healthy
-5. Traffic automatically routes to green
+5. Traffic automatically routes to dev
 
 ### Switch via GitHub Actions
 
-1. Go to **Actions** → **Blue-Green Deployment**
+1. Go to **Actions** → **prod-dev Deployment**
 2. Click **Run workflow**
-3. Select **green**
+3. Select **dev**
 4. Click **Run workflow**
 
 ### Verify the Switch
@@ -250,9 +250,9 @@ curl $(terraform output -raw app_url)
 curl $(terraform output -raw app_url)/health
 ```
 
-**Expected response after switching to green:**
+**Expected response after switching to dev:**
 ```json
-{"status":"ok","environment":"green","version":"1.0","timestamp":"..."}
+{"status":"ok","environment":"dev","version":"1.0","timestamp":"..."}
 ```
 
 ---
@@ -261,25 +261,25 @@ curl $(terraform output -raw app_url)/health
 
 ### Instant Rollback
 
-If something goes wrong with the green deployment, rollback instantly:
+If something goes wrong with the dev deployment, rollback instantly:
 
 ```bash
-# Rollback to blue
-terraform apply -var="active_target=blue"
+# Rollback to prod
+terraform apply -var="active_target=prod"
 ```
 
 Or via GitHub Actions:
-1. Run workflow with **blue** selected
+1. Run workflow with **prod** selected
 
 ### Rollback Timeline
 
 | Time | Action |
 |------|--------|
-| 0s | Run `terraform apply -var="active_target=blue"` |
-| ~10s | Listener switches to blue-tg |
-| ~30s | Blue ASG begins scaling up |
-| ~2-3 min | New blue instance passes health checks |
-| ~3-5 min | Full traffic on blue, green scales down |
+| 0s | Run `terraform apply -var="active_target=prod"` |
+| ~10s | Listener switches to prod-tg |
+| ~30s | prod ASG begins scaling up |
+| ~2-3 min | New prod instance passes health checks |
+| ~3-5 min | Full traffic on prod, dev scales down |
 
 ### Emergency Rollback (AWS Console)
 
@@ -311,14 +311,14 @@ curl -I http://$(terraform output -raw alb_dns_name)
 #### 2. Check Target Group Health
 
 **AWS Console:**
-- EC2 → Target Groups → blue-tg (or green-tg) → Targets tab
+- EC2 → Target Groups → prod-tg (or dev-tg) → Targets tab
 - Status should be **healthy**
 
 **CLI:**
 ```bash
 # Get target group ARN
 TG_ARN=$(aws elbv2 describe-target-groups \
-  --names blue-tg \
+  --names prod-tg \
   --query 'TargetGroups[0].TargetGroupArn' \
   --output text)
 
@@ -341,14 +341,14 @@ curl $APP_URL/health
 #### 4. Verify Auto Scaling Group
 
 ```bash
-# Check blue ASG
+# Check prod ASG
 aws autoscaling describe-auto-scaling-groups \
-  --auto-scaling-group-names blue-asg \
+  --auto-scaling-group-names prod-asg \
   --query 'AutoScalingGroups[0].{Desired:DesiredCapacity,Running:Instances[*].HealthStatus}'
 
-# Check green ASG
+# Check dev ASG
 aws autoscaling describe-auto-scaling-groups \
-  --auto-scaling-group-names green-asg \
+  --auto-scaling-group-names dev-asg \
   --query 'AutoScalingGroups[0].{Desired:DesiredCapacity,Running:Instances[*].HealthStatus}'
 ```
 
@@ -363,24 +363,24 @@ aws autoscaling describe-auto-scaling-groups \
 cd terraform
 terraform init -backend-config=backend.hcl
 
-# 2. Deploy blue
-terraform apply -var="active_target=blue"
+# 2. Deploy prod
+terraform apply -var="active_target=prod"
 
 # 3. Verify
 curl $(terraform output -raw app_url)
 ```
 
-### Scenario 2: Deploy New Version to Green
+### Scenario 2: Deploy New Version to dev
 
 ```bash
-# 1. Update app/green/app.js with new code
+# 1. Update app/dev/app.js with new code
 # 2. Commit and push changes
-git add app/green/
-git commit -m "Update green app with new feature"
+git add app/dev/
+git commit -m "Update dev app with new feature"
 git push origin main
 
-# 3. Switch to green (launches new instance with updated code)
-terraform apply -var="active_target=green"
+# 3. Switch to dev (launches new instance with updated code)
+terraform apply -var="active_target=dev"
 
 # 4. Verify new version
 curl $(terraform output -raw app_url)/health
@@ -389,11 +389,11 @@ curl $(terraform output -raw app_url)/health
 ### Scenario 3: Rollback After Failed Deployment
 
 ```bash
-# Green deployment has issues
-# Immediately switch back to blue
-terraform apply -var="active_target=blue"
+# dev deployment has issues
+# Immediately switch back to prod
+terraform apply -var="active_target=prod"
 
-# Verify blue is serving traffic
+# Verify prod is serving traffic
 curl $(terraform output -raw app_url)
 ```
 
@@ -402,17 +402,17 @@ curl $(terraform output -raw app_url)
 ```bash
 # Made changes to Terraform files (e.g., instance type)
 # Plan first
-terraform plan -var="active_target=blue"
+terraform plan -var="active_target=prod"
 
 # Apply if changes look correct
-terraform apply -var="active_target=blue"
+terraform apply -var="active_target=prod"
 ```
 
 ### Scenario 5: Complete Teardown
 
 ```bash
 # Destroy all resources
-terraform destroy -var="active_target=blue"
+terraform destroy -var="active_target=prod"
 
 # Verify (should show no resources)
 terraform show
@@ -443,14 +443,14 @@ terraform show
          ▼                                     ▼
   ┌─────────────┐                     ┌─────────────────┐
   │ terraform   │                     │ terraform apply │
-  │   plan      │                     │ -var=green      │
+  │   plan      │                     │ -var=dev      │
   └──────┬──────┘                     └────────┬────────┘
          │                                     │
          ▼                                     ▼
   ┌─────────────┐                     ┌─────────────────┐
   │ terraform   │                     │ Listener switch │
   │   apply     │                     │ ASG scales      │
-  │ -var=blue   │                     └────────┬────────┘
+  │ -var=prod   │                     └────────┬────────┘
   └──────┬──────┘                              │
          │                                     ▼
          ▼                            ┌─────────────────┐
@@ -478,11 +478,11 @@ terraform show
   ┌─────────────┐                     │ Actions trigger │
   │ terraform   │                     │ or manual run   │
   │   apply     │                     └────────┬────────┘
-  │ -var=blue   │                              │
+  │ -var=prod   │                              │
   └──────┬──────┘                              ▼
          │                            ┌─────────────────┐
-         ▼                            │ Select blue or  │
-  ┌─────────────┐                     │    green        │
+         ▼                            │ Select prod or  │
+  ┌─────────────┐                     │    dev        │
   │ Instant     │                     └────────┬────────┘
   │ switch back │                              │
   └──────┬──────┘                              ▼
@@ -550,13 +550,13 @@ aws s3 ls s3://your-bucket-name
 | Task | Command |
 |------|---------|
 | Initialize | `terraform init -backend-config=backend.hcl` |
-| Plan | `terraform plan -var="active_target=blue"` |
-| Deploy Blue | `terraform apply -var="active_target=blue"` |
-| Switch to Green | `terraform apply -var="active_target=green"` |
-| Rollback to Blue | `terraform apply -var="active_target=blue"` |
+| Plan | `terraform plan -var="active_target=prod"` |
+| Deploy prod | `terraform apply -var="active_target=prod"` |
+| Switch to dev | `terraform apply -var="active_target=dev"` |
+| Rollback to prod | `terraform apply -var="active_target=prod"` |
 | Get URL | `terraform output app_url` |
 | Check State | `terraform show` |
-| Destroy | `terraform destroy -var="active_target=blue"` |
+| Destroy | `terraform destroy -var="active_target=prod"` |
 
 ---
 

@@ -14,6 +14,6 @@ output "app_url" {
 }
 
 output "active_target" {
-  description = "Currently active target group (blue or green)"
+  description = "Currently active target group (prod or dev)"
   value       = var.active_target
 }

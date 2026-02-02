@@ -1,6 +1,6 @@
-# Blue-Green Deployment with AWS ALB + Terraform
+# prod-dev Deployment with AWS ALB + Terraform
 
-Production-ready blue-green deployment for a Node.js application using **AWS Application Load Balancer**, **Auto Scaling Groups**, **Terraform**, and **GitHub Actions**.
+Production-ready prod-dev deployment for a Node.js application using **AWS Application Load Balancer**, **Auto Scaling Groups**, **Terraform**, and **GitHub Actions**.
 
 ---
 
@@ -8,7 +8,7 @@ Production-ready blue-green deployment for a Node.js application using **AWS App
 
 | Feature | Description |
 |---------|-------------|
-| **Blue-Green** | Two identical environments (blue & green); only one receives traffic at a time |
+| **prod-dev** | Two identical environments (prod & dev); only one receives traffic at a time |
 | **Zero-downtime** | Switch traffic instantly by changing a single variable |
 | **Rollback** | Revert to previous environment in seconds |
 | **Infrastructure as Code** | All AWS resources managed via Terraform |
@@ -34,19 +34,19 @@ Production-ready blue-green deployment for a Node.js application using **AWS App
                             │              │    Port 80 HTTP     │                        │
                             │              │                     │                        │
                             │              │  active_target =    │                        │
-                            │              │   "blue" │ "green"  │                        │
+                            │              │   "prod" │ "dev"  │                        │
                             │              └──────────┬──────────┘                        │
                             │                         │                                   │
                             │         ┌───────────────┴───────────────┐                   │
                             │         ▼                               ▼                   │
                             │  ┌─────────────┐                 ┌─────────────┐            │
-                            │  │  blue-tg    │                 │  green-tg   │            │
+                            │  │  prod-tg    │                 │  dev-tg   │            │
                             │  │  Port 3000  │                 │  Port 3000  │            │
                             │  └──────┬──────┘                 └──────┬──────┘            │
                             │         │                               │                   │
                             │         ▼                               ▼                   │
                             │  ┌─────────────┐                 ┌─────────────┐            │
-                            │  │  blue-asg   │                 │  green-asg  │            │
+                            │  │  prod-asg   │                 │  dev-asg  │            │
                             │  │ desired=1/0 │                 │ desired=0/1 │            │
                             │  └──────┬──────┘                 └──────┬──────┘            │
                             │         │                               │                   │
@@ -55,7 +55,7 @@ Production-ready blue-green deployment for a Node.js application using **AWS App
                             │  │    EC2      │                 │    EC2      │            │
                             │  │ Node.js App │                 │ Node.js App │            │
                             │  │   :3000     │                 │   :3000     │            │
-                            │  │  (Blue)     │                 │  (Green)    │            │
+                            │  │  (prod)     │                 │  (dev)    │            │
                             │  └─────────────┘                 └─────────────┘            │
                             │                                                             │
                             │  ┌─────────────┐     ┌─────────────┐                        │
@@ -68,7 +68,7 @@ Production-ready blue-green deployment for a Node.js application using **AWS App
 
 ### How It Works
 
-1. **One apply creates both** blue and green environments (target groups, ASGs, launch templates)
+1. **One apply creates both** prod and dev environments (target groups, ASGs, launch templates)
 2. **`active_target`** variable controls which environment is live:
    - Listener forwards to the chosen target group
    - Active ASG has `desired_capacity = 1`, inactive has `0`
@@ -92,20 +92,20 @@ Production-ready blue-green deployment for a Node.js application using **AWS App
 
 ```
 ├── .github/workflows/
-│   └── deploy.yaml              # GitHub Actions workflow (blue/green choice)
+│   └── deploy.yaml              # GitHub Actions workflow (prod/dev choice)
 ├── app/
-│   ├── blue/
-│   │   ├── app.js               # Blue Node.js app (port 3000)
+│   ├── prod/
+│   │   ├── app.js               # prod Node.js app (port 3000)
 │   │   └── package.json
-│   └── green/
-│       ├── app.js               # Green Node.js app (port 3000)
+│   └── dev/
+│       ├── app.js               # dev Node.js app (port 3000)
 │       └── package.json
 ├── terraform/
 │   ├── main.tf                  # VPC, IGW, subnets, security groups
 │   ├── alb.tf                   # Application Load Balancer
-│   ├── listener.tf              # Listener (forwards to blue or green)
-│   ├── target-groups.tf         # blue-tg, green-tg (port 3000)
-│   ├── autoscaling.tf           # blue-asg, green-asg
+│   ├── listener.tf              # Listener (forwards to prod or dev)
+│   ├── target-groups.tf         # prod-tg, dev-tg (port 3000)
+│   ├── autoscaling.tf           # prod-asg, dev-asg
 │   ├── launch-templates.tf      # EC2 config, user_data (Node.js setup)
 │   ├── variable.tf              # region, vpc_cidr, active_target
 │   ├── outputs.tf               # ALB DNS, app URL
@@ -130,7 +130,7 @@ Create `terraform/backend.hcl` (do not commit):
 
 ```hcl
 bucket = "your-terraform-state-bucket"
-key    = "blue-green/terraform.tfstate"
+key    = "prod-dev/terraform.tfstate"
 region = "us-east-1"
 ```
 
@@ -141,20 +141,20 @@ cd terraform
 terraform init -backend-config=backend.hcl
 ```
 
-### Step 3: Deploy Blue Environment (First Time)
+### Step 3: Deploy prod Environment (First Time)
 
 ```bash
-terraform plan -var="active_target=blue"
-terraform apply -var="active_target=blue"
+terraform plan -var="active_target=prod"
+terraform apply -var="active_target=prod"
 ```
 
 **What gets created:**
 - VPC with 2 public subnets (2 AZs)
 - Internet Gateway and route tables
 - Application Load Balancer
-- Blue and Green target groups
-- Blue and Green Auto Scaling Groups
-- Blue ASG launches 1 instance, Green ASG has 0
+- prod and dev target groups
+- prod and dev Auto Scaling Groups
+- prod ASG launches 1 instance, dev ASG has 0
 
 ### Step 4: Access the Application
 
@@ -163,31 +163,31 @@ terraform output app_url
 # Output: http://main-alb-123456789.us-east-1.elb.amazonaws.com
 ```
 
-Open the URL in your browser — you should see the **Blue Environment** page.
+Open the URL in your browser — you should see the **prod Environment** page.
 
 ---
 
 ## Switching Environments
 
-### Switch to Green
+### Switch to dev
 
 ```bash
-terraform apply -var="active_target=green"
+terraform apply -var="active_target=dev"
 ```
 
 **What happens:**
-- Listener forwards traffic to **green-tg**
-- Green ASG scales to 1 instance
-- Blue ASG scales to 0 instances
-- Open ALB URL → **Green Environment** page
+- Listener forwards traffic to **dev-tg**
+- dev ASG scales to 1 instance
+- prod ASG scales to 0 instances
+- Open ALB URL → **dev Environment** page
 
-### Switch Back to Blue (Rollback)
+### Switch Back to prod (Rollback)
 
 ```bash
-terraform apply -var="active_target=blue"
+terraform apply -var="active_target=prod"
 ```
 
-Traffic instantly moves back to blue.
+Traffic instantly moves back to prod.
 
 ---
 
@@ -206,9 +206,9 @@ In your GitHub repo: **Settings → Secrets and variables → Actions → New re
 
 ### Run Deployment
 
-1. Go to **Actions** → **Blue-Green Deployment**
+1. Go to **Actions** → **prod-dev Deployment**
 2. Click **Run workflow**
-3. Select **blue** or **green**
+3. Select **prod** or **dev**
 4. Click **Run workflow**
 
 The workflow will:
@@ -223,8 +223,8 @@ The workflow will:
 
 | Endpoint | Response |
 |----------|----------|
-| `/` | HTML page (Blue or Green themed) |
-| `/health` | JSON: `{"status":"ok","environment":"blue\|green","version":"1.0","timestamp":"..."}` |
+| `/` | HTML page (prod or dev themed) |
+| `/health` | JSON: `{"status":"ok","environment":"prod\|dev","version":"1.0","timestamp":"..."}` |
 
 **Target group health check:** Path `/`, Port `3000`, HTTP, Success codes `200-299`
 
@@ -242,7 +242,7 @@ terraform output
 |--------|-------------|
 | `alb_dns_name` | ALB DNS name |
 | `app_url` | Full URL to access the app |
-| `active_target` | Currently active environment (blue/green) |
+| `active_target` | Currently active environment (prod/dev) |
 
 ---
 
@@ -253,7 +253,7 @@ terraform output
 **Cause:** No healthy instances in the target group.
 
 **Fix:**
-1. Check target group health: **EC2 → Target Groups → blue-tg → Targets**
+1. Check target group health: **EC2 → Target Groups → prod-tg → Targets**
 2. If unhealthy, connect to instance and check:
    ```bash
    sudo systemctl status nodeapp
@@ -296,7 +296,7 @@ To destroy all resources:
 
 ```bash
 cd terraform
-terraform destroy -var="active_target=blue"
+terraform destroy -var="active_target=prod"
 ```
 
 ---
@@ -310,7 +310,7 @@ terraform destroy -var="active_target=blue"
 | `region` | `us-east-1` | AWS region |
 | `vpc_cidr` | `10.0.0.0/16` | VPC CIDR block |
 | `subnet_cidrs` | `["10.0.1.0/24", "10.0.2.0/24"]` | Subnet CIDRs |
-| `active_target` | `blue` | Active environment (`blue` or `green`) |
+| `active_target` | `prod` | Active environment (`prod` or `dev`) |
 
 ### Security Groups
 
@@ -326,10 +326,10 @@ terraform destroy -var="active_target=blue"
 | Action | Command |
 |--------|---------|
 | **Initialize** | `terraform init -backend-config=backend.hcl` |
-| **Deploy Blue** | `terraform apply -var="active_target=blue"` |
-| **Switch to Green** | `terraform apply -var="active_target=green"` |
-| **Rollback to Blue** | `terraform apply -var="active_target=blue"` |
-| **Destroy** | `terraform destroy -var="active_target=blue"` |
+| **Deploy prod** | `terraform apply -var="active_target=prod"` |
+| **Switch to dev** | `terraform apply -var="active_target=dev"` |
+| **Rollback to prod** | `terraform apply -var="active_target=prod"` |
+| **Destroy** | `terraform destroy -var="active_target=prod"` |
 
 ---
 

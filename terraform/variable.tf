@@ -18,12 +18,13 @@ variable "subnet_cidrs" {
 }
 
 variable "active_target" {
-  description = "The active target group (blue or green) - controls which environment receives traffic"
+  description = "The active target group (prod or dev) - controls which environment receives traffic"
   type        = string
-  default     = "blue"
+  default     = "prod"
 
   validation {
-    condition     = contains(["blue", "green"], var.active_target)
-    error_message = "active_target must be either 'blue' or 'green'."
+    condition     = contains(["prod", "dev"], var.active_target)
+    error_message = "active_target must be either 'prod' or 'dev'."
   }
 }
+

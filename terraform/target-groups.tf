@@ -1,6 +1,6 @@
 # Target groups use port 3000 to match Node.js app listen port
-resource "aws_lb_target_group" "blue" {
-  name     = "blue-tg"
+resource "aws_lb_target_group" "prod" {
+  name     = "prod-tg"
   port     = 3000
   protocol = "HTTP"
   vpc_id   = aws_vpc.main.id
@@ -16,12 +16,12 @@ resource "aws_lb_target_group" "blue" {
     port                = "traffic-port"
   }
   tags = {
-    Name = "blue-tg"
+    Name = "prod-tg"
   }
 }
 
-resource "aws_lb_target_group" "green" {
-  name     = "green-tg"
+resource "aws_lb_target_group" "dev" {
+  name     = "dev-tg"
   port     = 3000
   protocol = "HTTP"
   vpc_id   = aws_vpc.main.id
@@ -37,6 +37,6 @@ resource "aws_lb_target_group" "green" {
     port                = "traffic-port"
   }
   tags = {
-    Name = "green-tg"
+    Name = "dev-tg"
   }
 }

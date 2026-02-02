@@ -6,7 +6,7 @@ terraform {
     }
   }
 
-  # S3 backend: required for GitHub Actions so state is shared between runs (so the blue/green button can switch).
+  # S3 backend: required for GitHub Actions so state is shared between runs (so the prod/dev button can switch).
   # Provide bucket, key, region via -backend-config (see backend.hcl.example) or workflow secrets.
   backend "s3" {}
 }

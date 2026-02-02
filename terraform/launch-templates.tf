@@ -20,8 +20,8 @@ data "aws_ami" "ubuntu" {
   }
 }
 
-resource "aws_launch_template" "blue" {
-  name_prefix   = "blue-template-"
+resource "aws_launch_template" "prod" {
+  name_prefix   = "prod-template-"
   image_id      = data.aws_ami.ubuntu.id
   instance_type = "t2.micro"
 
@@ -46,31 +46,28 @@ resource "aws_launch_template" "blue" {
     cd /home/ubuntu
 
     # Clone repo (only if not exists)
-    if [ ! -d "blue-green-deployment" ]; then
-      git clone https://github.com/anupsharma329/blue-green-deployment.git
+    if [ ! -d "prod-dev-deployment" ]; then
+      git clone https://github.com/anupsharma329/prod-dev-deployment.git
     fi
 
-    cd blue-green-deployment/app/blue
+    cd prod-dev-deployment/app
 
     # Fix ownership BEFORE npm
-    chown -R ubuntu:ubuntu /home/ubuntu/blue-green-deployment
+    chown -R ubuntu:ubuntu /home/ubuntu/prod-dev-deployment
 
     # Install deps as ubuntu
     sudo -u ubuntu npm install
 
-    # Ensure listen on all interfaces
-    sed -i "s/}).listen(3000);/}).listen(3000, '0.0.0.0');/" app.js || true
-
     # Create systemd service
     cat <<SERVICE > /etc/systemd/system/nodeapp.service
     [Unit]
-    Description=Node.js Blue App
+    Description=Node.js prod App
     After=network.target
 
     [Service]
     Type=simple
     User=ubuntu
-    WorkingDirectory=/home/ubuntu/blue-green-deployment/app/blue
+    WorkingDirectory=/home/ubuntu/prod-dev-deployment/app
     ExecStart=/usr/bin/node app.js
     Restart=always
     RestartSec=5
@@ -99,8 +96,8 @@ resource "aws_launch_template" "blue" {
     EOF
   )
 }
-resource "aws_launch_template" "green" {
-  name_prefix   = "green-template-"
+resource "aws_launch_template" "dev" {
+  name_prefix   = "dev-template-"
   image_id      = data.aws_ami.ubuntu.id
   instance_type = "t2.micro"
 
@@ -125,31 +122,28 @@ resource "aws_launch_template" "green" {
     cd /home/ubuntu
 
     # Clone repo (only if not exists)
-    if [ ! -d "blue-green-deployment" ]; then
-      git clone https://github.com/anupsharma329/blue-green-deployment.git
+    if [ ! -d "prod-dev-deployment" ]; then
+      git clone https://github.com/anupsharma329/prod-dev-deployment.git
     fi
 
-    cd blue-green-deployment/app/blue
+    cd prod-dev-deployment/app
 
     # Fix ownership BEFORE npm
-    chown -R ubuntu:ubuntu /home/ubuntu/blue-green-deployment
+    chown -R ubuntu:ubuntu /home/ubuntu/prod-dev-deployment
 
     # Install deps as ubuntu
     sudo -u ubuntu npm install
 
-    # Ensure listen on all interfaces
-    sed -i "s/}).listen(3000);/}).listen(3000, '0.0.0.0');/" app.js || true
-
     # Create systemd service
     cat <<SERVICE > /etc/systemd/system/nodeapp.service
     [Unit]
-    Description=Node.js Blue App
+    Description=Node.js dev App
     After=network.target
 
     [Service]
     Type=simple
     User=ubuntu
-    WorkingDirectory=/home/ubuntu/blue-green-deployment/app/green
+    WorkingDirectory=/home/ubuntu/prod-dev-deployment/app
     ExecStart=/usr/bin/node app.js
     Restart=always
     RestartSec=5
