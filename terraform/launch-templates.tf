@@ -47,7 +47,7 @@ resource "aws_launch_template" "prod" {
 
     # Clone repo (only if not exists)
     if [ ! -d "prod-dev-deployment" ]; then
-      git clone https://github.com/anupsharma329/application-deployment-using-alb
+      git clone https://github.com/anupsharma329/prod-dev-deployment.git
     fi
 
     cd prod-dev-deployment/app
@@ -123,7 +123,7 @@ resource "aws_launch_template" "dev" {
 
     # Clone repo (only if not exists)
     if [ ! -d "prod-dev-deployment" ]; then
-      git clone https://github.com/anupsharma329/application-deployment-using-alb
+      git clone https://github.com/anupsharma329/prod-dev-deployment.git
     fi
 
     cd prod-dev-deployment/app
