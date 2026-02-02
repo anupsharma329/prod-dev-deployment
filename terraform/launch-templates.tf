@@ -63,7 +63,7 @@ resource "aws_launch_template" "prod" {
     cd prod-dev-deployment/app
 
     # Fix ownership BEFORE npm
-    chown -R ubuntu:ubuntu /home/ubuntu/prod-dev-deployment
+    chown -R ubuntu:ubuntu /home/ubuntu/prod-dev-deployment/app
 
     # Install deps as ubuntu
     sudo -u ubuntu npm install
@@ -149,7 +149,7 @@ resource "aws_launch_template" "dev" {
     cd prod-dev-deployment/app
 
     # Fix ownership BEFORE npm
-    chown -R ubuntu:ubuntu /home/ubuntu/prod-dev-deployment
+    chown -R ubuntu:ubuntu /home/ubuntu/prod-dev-deployment/app
 
     # Install deps as ubuntu
     sudo -u ubuntu npm install
@@ -167,7 +167,7 @@ resource "aws_launch_template" "dev" {
     ExecStart=/usr/bin/node app.js
     Restart=always
     RestartSec=5
-    Environment=NODE_ENV=production
+    Environment=NODE_ENV=development
 
     [Install]
     WantedBy=multi-user.target
