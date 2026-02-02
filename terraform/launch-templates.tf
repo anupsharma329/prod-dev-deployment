@@ -52,13 +52,13 @@ resource "aws_launch_template" "prod" {
     # Clone/pull repo (non-interactive)
     if [ ! -d "prod-dev-deployment/.git" ]; then
       rm -rf prod-dev-deployment
-      git clone --branch "${BRANCH}" --single-branch "${REPO_URL}" prod-dev-deployment
+      git clone --branch "$${BRANCH}" --single-branch "$${REPO_URL}" prod-dev-deployment
     fi
 
     cd prod-dev-deployment
-    git fetch origin "${BRANCH}"
-    git checkout "${BRANCH}"
-    git reset --hard "origin/${BRANCH}"
+    git fetch origin "$${BRANCH}"
+    git checkout "$${BRANCH}"
+    git reset --hard "origin/$${BRANCH}"
 
     cd prod-dev-deployment/app
 
@@ -138,13 +138,13 @@ resource "aws_launch_template" "dev" {
     # Clone/pull repo (non-interactive)
     if [ ! -d "prod-dev-deployment/.git" ]; then
       rm -rf prod-dev-deployment
-      git clone --branch "${BRANCH}" --single-branch "${REPO_URL}" prod-dev-deployment
+      git clone --branch "$${BRANCH}" --single-branch "$${REPO_URL}" prod-dev-deployment
     fi
 
     cd prod-dev-deployment
-    git fetch origin "${BRANCH}"
-    git checkout "${BRANCH}"
-    git reset --hard "origin/${BRANCH}"
+    git fetch origin "$${BRANCH}"
+    git checkout "$${BRANCH}"
+    git reset --hard "origin/$${BRANCH}"
 
     cd prod-dev-deployment/app
 
