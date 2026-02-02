@@ -14,9 +14,8 @@ app.get('/', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
-
 // Health check
-app.get('/v1/health', (req, res) => {
+app.get('/v2/health', (req, res) => {
   res.status(200).json({
     status: 'ok',
     uptime: process.uptime(),
@@ -25,9 +24,9 @@ app.get('/v1/health', (req, res) => {
 });
 
 // Versioned API endpoint
-app.get('/v1/hello', (req, res) => {
+app.get('/v2/hello', (req, res) => {
   res.json({
-    message: 'Hello from v1 API 👋'
+    message: 'Hello from v2 API 👋'
   });
 });
 
