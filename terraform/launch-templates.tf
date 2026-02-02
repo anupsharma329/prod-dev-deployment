@@ -29,6 +29,7 @@ resource "aws_launch_template" "prod" {
 
   user_data = base64encode(<<-EOF
     #!/bin/bash
+    set -euo pipefail
 
     exec > /var/log/user-data.log 2>&1
 
@@ -45,10 +46,19 @@ resource "aws_launch_template" "prod" {
     # Switch to ubuntu user home
     cd /home/ubuntu
 
-    # Clone repo (only if not exists)
-    if [ ! -d "prod-dev-deployment" ]; then
-      git clone https://github.com/anupsharma329/prod-dev-deployment.git
+    REPO_URL="https://github.com/anupsharma329/prod-dev-deployment.git"
+    BRANCH="main"
+
+    # Clone/pull repo (non-interactive)
+    if [ ! -d "prod-dev-deployment/.git" ]; then
+      rm -rf prod-dev-deployment
+      git clone --branch "${BRANCH}" --single-branch "${REPO_URL}" prod-dev-deployment
     fi
+
+    cd prod-dev-deployment
+    git fetch origin "${BRANCH}"
+    git checkout "${BRANCH}"
+    git reset --hard "origin/${BRANCH}"
 
     cd prod-dev-deployment/app
 
@@ -105,6 +115,7 @@ resource "aws_launch_template" "dev" {
 
   user_data = base64encode(<<-EOF
     #!/bin/bash
+    set -euo pipefail
 
     exec > /var/log/user-data.log 2>&1
 
@@ -121,10 +132,19 @@ resource "aws_launch_template" "dev" {
     # Switch to ubuntu user home
     cd /home/ubuntu
 
-    # Clone repo (only if not exists)
-    if [ ! -d "prod-dev-deployment" ]; then
-      git clone https://github.com/anupsharma329/prod-dev-deployment.git
+    REPO_URL="https://github.com/anupsharma329/prod-dev-deployment.git"
+    BRANCH="dev"
+
+    # Clone/pull repo (non-interactive)
+    if [ ! -d "prod-dev-deployment/.git" ]; then
+      rm -rf prod-dev-deployment
+      git clone --branch "${BRANCH}" --single-branch "${REPO_URL}" prod-dev-deployment
     fi
+
+    cd prod-dev-deployment
+    git fetch origin "${BRANCH}"
+    git checkout "${BRANCH}"
+    git reset --hard "origin/${BRANCH}"
 
     cd prod-dev-deployment/app
 
