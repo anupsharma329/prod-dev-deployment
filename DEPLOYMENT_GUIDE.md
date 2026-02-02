@@ -1,571 +1,152 @@
-# Deployment Guide
+# Deployment Guide (prod/dev switching with Terraform)
 
-Complete step-by-step guide for deploying the prod-dev infrastructure on AWS.
+This guide matches the current repository layout and Terraform/GitHub Actions behavior.
 
----
+## Pre-deployment checklist
 
-## Table of Contents
-
-1. [Pre-Deployment Checklist](#pre-deployment-checklist)
-2. [Local Deployment (Manual)](#local-deployment-manual)
-3. [GitHub Actions Deployment (CI/CD)](#github-actions-deployment-cicd)
-4. [Switching Environments](#switching-environments)
-5. [Rollback Procedure](#rollback-procedure)
-6. [Post-Deployment Validation](#post-deployment-validation)
-7. [Common Deployment Scenarios](#common-deployment-scenarios)
-
----
-
-## Pre-Deployment Checklist
-
-Before deploying, ensure you have completed these items:
-
-### AWS Setup
-
-- [ ] AWS account with appropriate permissions (VPC, EC2, ALB, ASG, IAM, S3)
-- [ ] AWS CLI installed and configured
-- [ ] IAM user/role with programmatic access
+- **AWS CLI configured**
 
 ```bash
-# Verify AWS CLI configuration
 aws sts get-caller-identity
 ```
 
-### Local Tools
-
-- [ ] Terraform v1.6+ installed
-- [ ] Git installed
+- **Terraform installed** \(1.6+\)
 
 ```bash
-# Verify Terraform
 terraform version
-
-# Expected output: Terraform v1.6.x or higher
 ```
 
-### S3 Backend (Required for Team/CI)
-
-- [ ] S3 bucket created for Terraform state
+- **S3 bucket exists for Terraform state** (required for GitHub Actions / recommended for local too)
 
 ```bash
-# Create S3 bucket (one-time)
 aws s3 mb s3://your-unique-bucket-name --region us-east-1
-
-# Enable versioning (recommended)
-aws s3api put-bucket-versioning \
-  --bucket your-unique-bucket-name \
-  --versioning-configuration Status=Enabled
+aws s3api put-bucket-versioning --bucket your-unique-bucket-name --versioning-configuration Status=Enabled
 ```
 
-### GitHub Secrets (For CI/CD)
+- **GitHub repo is cloneable from EC2**
 
-- [ ] `AWS_ACCESS_KEY_ID` - IAM access key
-- [ ] `AWS_SECRET_ACCESS_KEY` - IAM secret key
-- [ ] `TF_STATE_BUCKET` - S3 bucket name
-- [ ] `AWS_REGION` - AWS region (optional, defaults to us-east-1)
+Your launch templates run `git clone` from GitHub during boot. If the repo is **private**, instances cannot clone and will never become healthy unless you add authentication.
 
----
+## Local deployment (manual)
 
-## Local Deployment (Manual)
-
-### Step 1: Clone the Repository
-
-```bash
-git clone https://github.com/your-username/prod-dev-deployment.git
-cd prod-dev-deployment
-```
-
-### Step 2: Create Backend Configuration
-
-Create `terraform/backend.hcl` (this file is gitignored):
-
-```hcl
-bucket = "your-terraform-state-bucket"
-key    = "prod-dev/terraform.tfstate"
-region = "us-east-1"
-```
-
-### Step 3: Initialize Terraform
+### 1) Initialize Terraform with the S3 backend
 
 ```bash
 cd terraform
-
-# Initialize with S3 backend
-terraform init -backend-config=backend.hcl
+terraform init \
+  -backend-config="bucket=your-unique-bucket-name" \
+  -backend-config="key=prod-dev/terraform.tfstate" \
+  -backend-config="region=us-east-1"
 ```
 
-**Expected output:**
-```
-Initializing the backend...
-Successfully configured the backend "s3"!
-Terraform has been successfully initialized!
-```
-
-### Step 4: Review the Plan
+### 2) Deploy prod (or dev)
 
 ```bash
-terraform plan -var="active_target=prod"
+terraform apply -auto-approve -var="active_target=prod"
 ```
 
-**What you'll see:**
-- VPC and networking resources
-- Security groups (alb-sg, app-sg)
-- Application Load Balancer
-- Target groups (prod-tg, dev-tg)
-- Launch templates (prod-template, dev-template)
-- Auto Scaling Groups (prod-asg, dev-asg)
-
-**Expected:** `Plan: 18 to add, 0 to change, 0 to destroy`
-
-### Step 5: Apply (Deploy prod Environment)
+Switch later:
 
 ```bash
-terraform apply -var="active_target=prod"
+terraform apply -auto-approve -var="active_target=dev"
 ```
 
-Type `yes` when prompted.
-
-**Deployment takes approximately 3-5 minutes.**
-
-### Step 6: Get the Application URL
+### 3) Verify the app
 
 ```bash
-terraform output app_url
+APP_URL="$(terraform output -raw app_url)"
+curl -sS "$APP_URL/"
+curl -sS "$APP_URL/v2/health"
+curl -sS "$APP_URL/v2/hello"
 ```
 
-**Example output:**
-```
-app_url = "http://main-alb-123456789.us-east-1.elb.amazonaws.com"
-```
+## GitHub Actions deployment (CI/CD)
 
-### Step 7: Verify Deployment
+Workflow: `.github/workflows/deploy.yaml`
+
+### Required repository secrets
+
+| Secret | Required | Notes |
+|---|---:|---|
+| `AWS_ACCESS_KEY_ID` | yes | IAM user access key |
+| `AWS_SECRET_ACCESS_KEY` | yes | IAM user secret key |
+| `AWS_REGION` | yes | required by `configure-aws-credentials` |
+| `TF_STATE_BUCKET` | yes | Terraform S3 backend bucket |
+| `TF_STATE_KEY` | no | defaults to `prod-dev/terraform.tfstate` |
+
+### Run the workflow
+
+1. GitHub → **Actions** → **prod-dev Deployment**
+2. **Run workflow**
+3. Select **prod** or **dev**
+
+This runs Terraform with `-var="active_target=prod|dev"`.
+
+## Updating the application
+
+### Important note (how code reaches instances)
+
+Instances download code at boot via `terraform/launch-templates.tf`:
+- `prod` instances clone branch **`main`**
+- `dev` instances clone branch **`dev`**
+- the app must exist under the repo’s `app/` folder (so it can run `node app.js` from there)
+
+### Deploy a new version to dev
 
 ```bash
-# Wait 2-3 minutes for instance to become healthy
-# Then test the URL
-curl $(terraform output -raw app_url)
+git checkout dev
+git add app/
+git commit -m "Update app"
+git push -u origin dev
 ```
 
-**Expected:** HTML response with "prod Environment"
+Then switch traffic to dev (or keep dev active) and **replace the dev instance** so it pulls the new code (terminate the instance in the `dev-asg`, it will recreate).
 
----
-
-## GitHub Actions Deployment (CI/CD)
-
-### Step 1: Configure GitHub Secrets
-
-Navigate to: **Repository → Settings → Secrets and variables → Actions**
-
-Add these secrets:
-
-| Secret Name | Value |
-|------------|-------|
-| `AWS_ACCESS_KEY_ID` | Your IAM access key ID |
-| `AWS_SECRET_ACCESS_KEY` | Your IAM secret access key |
-| `TF_STATE_BUCKET` | Your S3 bucket name |
-| `AWS_REGION` | `us-east-1` (or your preferred region) |
-
-### Step 2: Push Code to Repository
+### Promote dev → prod
 
 ```bash
-git add .
-git commit -m "Initial prod-dev deployment setup"
+git checkout main
+git merge dev
 git push origin main
 ```
 
-### Step 3: Run the Workflow
-
-1. Go to **Actions** tab in GitHub
-2. Select **prod-dev Deployment** workflow
-3. Click **Run workflow**
-4. Select target environment:
-   - **prod** - Deploy to prod environment
-   - **dev** - Deploy to dev environment
-5. Click **Run workflow**
-
-### Step 4: Monitor the Workflow
-
-The workflow executes these steps:
-1. **Checkout** - Gets the latest code
-2. **Setup Terraform** - Installs Terraform
-3. **Configure AWS** - Sets up AWS credentials
-4. **Terraform Init** - Initializes with S3 backend
-5. **Terraform Format** - Validates code formatting
-6. **Terraform Plan** - Shows what will change
-7. **Terraform Apply** - Applies the changes
-
-### Step 5: View Outputs
-
-After successful completion, check the workflow logs for:
-- ALB DNS name
-- Application URL
-- Active target confirmation
-
----
-
-## Switching Environments
-
-### Understanding the Switch
-
-When you switch from prod to dev (or vice versa):
-
-| What Changes | prod Active | dev Active |
-|--------------|-------------|--------------|
-| Listener forwards to | prod-tg | dev-tg |
-| prod-asg desired_capacity | 1 | 0 |
-| dev-asg desired_capacity | 0 | 1 |
-| Traffic goes to | prod instances | dev instances |
-
-### Switch via CLI (Local)
+Then switch back to prod:
 
 ```bash
 cd terraform
-
-# Current: prod is active
-# Switch to dev
-terraform apply -var="active_target=dev"
+terraform apply -auto-approve -var="active_target=prod"
 ```
 
-**What happens:**
-1. Listener rule changes to forward to `dev-tg`
-2. `dev-asg` scales from 0 → 1 (launches instance)
-3. `prod-asg` scales from 1 → 0 (terminates instance)
-4. New instance takes ~3-5 minutes to become healthy
-5. Traffic automatically routes to dev
+## Troubleshooting
 
-### Switch via GitHub Actions
+### Terraform init fails: “S3 bucket does not exist”
 
-1. Go to **Actions** → **prod-dev Deployment**
-2. Click **Run workflow**
-3. Select **dev**
-4. Click **Run workflow**
-
-### Verify the Switch
+Create the bucket first, then re-run init:
 
 ```bash
-# Check which environment is active
-curl $(terraform output -raw app_url)
-
-# Or check the /health endpoint
-curl $(terraform output -raw app_url)/health
+aws s3 mb s3://your-unique-bucket-name --region us-east-1
 ```
 
-**Expected response after switching to dev:**
-```json
-{"status":"ok","environment":"dev","version":"1.0","timestamp":"..."}
-```
+### Target group unhealthy / ALB returns 502
 
----
+Most common causes:
+- user-data `git clone` failed (repo is private or branch doesn’t exist)
+- app path mismatch (repo doesn’t contain `app/app.js` + `app/package.json`)
+- service not running
 
-## Rollback Procedure
-
-### Instant Rollback
-
-If something goes wrong with the dev deployment, rollback instantly:
+On the instance (via EC2 Instance Connect):
 
 ```bash
-# Rollback to prod
-terraform apply -var="active_target=prod"
+sudo cat /var/log/user-data.log
+sudo systemctl status nodeapp --no-pager
+curl -sS http://127.0.0.1:3000/
 ```
 
-Or via GitHub Actions:
-1. Run workflow with **prod** selected
+### Rollback
 
-### Rollback Timeline
-
-| Time | Action |
-|------|--------|
-| 0s | Run `terraform apply -var="active_target=prod"` |
-| ~10s | Listener switches to prod-tg |
-| ~30s | prod ASG begins scaling up |
-| ~2-3 min | New prod instance passes health checks |
-| ~3-5 min | Full traffic on prod, dev scales down |
-
-### Emergency Rollback (AWS Console)
-
-If Terraform is unavailable, use AWS Console:
-
-1. **EC2 → Load Balancers → main-alb**
-2. **Listeners → HTTP:80 → View/edit rules**
-3. Change forward action to the other target group
-4. Save changes
-
----
-
-## Post-Deployment Validation
-
-### Checklist After Each Deployment
-
-#### 1. Verify ALB Health
+Rollback is just switching `active_target` back:
 
 ```bash
-# Get ALB DNS
-terraform output alb_dns_name
-
-# Test connectivity
-curl -I http://$(terraform output -raw alb_dns_name)
-```
-
-**Expected:** `HTTP/1.1 200 OK`
-
-#### 2. Check Target Group Health
-
-**AWS Console:**
-- EC2 → Target Groups → prod-tg (or dev-tg) → Targets tab
-- Status should be **healthy**
-
-**CLI:**
-```bash
-# Get target group ARN
-TG_ARN=$(aws elbv2 describe-target-groups \
-  --names prod-tg \
-  --query 'TargetGroups[0].TargetGroupArn' \
-  --output text)
-
-# Check health
-aws elbv2 describe-target-health --target-group-arn $TG_ARN
-```
-
-#### 3. Test Application Endpoints
-
-```bash
-APP_URL=$(terraform output -raw app_url)
-
-# Home page
-curl $APP_URL
-
-# Health check
-curl $APP_URL/health
-```
-
-#### 4. Verify Auto Scaling Group
-
-```bash
-# Check prod ASG
-aws autoscaling describe-auto-scaling-groups \
-  --auto-scaling-group-names prod-asg \
-  --query 'AutoScalingGroups[0].{Desired:DesiredCapacity,Running:Instances[*].HealthStatus}'
-
-# Check dev ASG
-aws autoscaling describe-auto-scaling-groups \
-  --auto-scaling-group-names dev-asg \
-  --query 'AutoScalingGroups[0].{Desired:DesiredCapacity,Running:Instances[*].HealthStatus}'
-```
-
----
-
-## Common Deployment Scenarios
-
-### Scenario 1: First-Time Deployment
-
-```bash
-# 1. Initialize
 cd terraform
-terraform init -backend-config=backend.hcl
-
-# 2. Deploy prod
-terraform apply -var="active_target=prod"
-
-# 3. Verify
-curl $(terraform output -raw app_url)
+terraform apply -auto-approve -var="active_target=prod"
 ```
-
-### Scenario 2: Deploy New Version to dev
-
-```bash
-# 1. Update app/dev/app.js with new code
-# 2. Commit and push changes
-git add app/dev/
-git commit -m "Update dev app with new feature"
-git push origin main
-
-# 3. Switch to dev (launches new instance with updated code)
-terraform apply -var="active_target=dev"
-
-# 4. Verify new version
-curl $(terraform output -raw app_url)/health
-```
-
-### Scenario 3: Rollback After Failed Deployment
-
-```bash
-# dev deployment has issues
-# Immediately switch back to prod
-terraform apply -var="active_target=prod"
-
-# Verify prod is serving traffic
-curl $(terraform output -raw app_url)
-```
-
-### Scenario 4: Update Infrastructure (Not App)
-
-```bash
-# Made changes to Terraform files (e.g., instance type)
-# Plan first
-terraform plan -var="active_target=prod"
-
-# Apply if changes look correct
-terraform apply -var="active_target=prod"
-```
-
-### Scenario 5: Complete Teardown
-
-```bash
-# Destroy all resources
-terraform destroy -var="active_target=prod"
-
-# Verify (should show no resources)
-terraform show
-```
-
----
-
-## Deployment Flow Diagram
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         DEPLOYMENT FLOW                                  │
-└─────────────────────────────────────────────────────────────────────────┘
-
-  FIRST DEPLOYMENT                    ENVIRONMENT SWITCH
-  ═══════════════                     ══════════════════
-
-  ┌─────────────┐                     ┌─────────────────┐
-  │  git clone  │                     │ Update app code │
-  └──────┬──────┘                     └────────┬────────┘
-         │                                     │
-         ▼                                     ▼
-  ┌─────────────┐                     ┌─────────────────┐
-  │ terraform   │                     │   git commit    │
-  │    init     │                     │   git push      │
-  └──────┬──────┘                     └────────┬────────┘
-         │                                     │
-         ▼                                     ▼
-  ┌─────────────┐                     ┌─────────────────┐
-  │ terraform   │                     │ terraform apply │
-  │   plan      │                     │ -var=dev      │
-  └──────┬──────┘                     └────────┬────────┘
-         │                                     │
-         ▼                                     ▼
-  ┌─────────────┐                     ┌─────────────────┐
-  │ terraform   │                     │ Listener switch │
-  │   apply     │                     │ ASG scales      │
-  │ -var=prod   │                     └────────┬────────┘
-  └──────┬──────┘                              │
-         │                                     ▼
-         ▼                            ┌─────────────────┐
-  ┌─────────────┐                     │ Health checks   │
-  │   Wait for  │                     │    pass         │
-  │   healthy   │                     └────────┬────────┘
-  └──────┬──────┘                              │
-         │                                     ▼
-         ▼                            ┌─────────────────┐
-  ┌─────────────┐                     │ Traffic on new  │
-  │  Access     │                     │  environment    │
-  │  ALB URL    │                     └─────────────────┘
-  └─────────────┘
-
-
-  ROLLBACK                            CI/CD (GitHub Actions)
-  ════════                            ══════════════════════
-
-  ┌─────────────┐                     ┌─────────────────┐
-  │ Issue       │                     │ Push to main    │
-  │ detected    │                     └────────┬────────┘
-  └──────┬──────┘                              │
-         │                                     ▼
-         ▼                            ┌─────────────────┐
-  ┌─────────────┐                     │ Actions trigger │
-  │ terraform   │                     │ or manual run   │
-  │   apply     │                     └────────┬────────┘
-  │ -var=prod   │                              │
-  └──────┬──────┘                              ▼
-         │                            ┌─────────────────┐
-         ▼                            │ Select prod or  │
-  ┌─────────────┐                     │    dev        │
-  │ Instant     │                     └────────┬────────┘
-  │ switch back │                              │
-  └──────┬──────┘                              ▼
-         │                            ┌─────────────────┐
-         ▼                            │ Workflow runs   │
-  ┌─────────────┐                     │ init/plan/apply │
-  │ Service     │                     └────────┬────────┘
-  │ restored    │                              │
-  └─────────────┘                              ▼
-                                      ┌─────────────────┐
-                                      │ Deployment      │
-                                      │ complete        │
-                                      └─────────────────┘
-```
-
----
-
-## Troubleshooting During Deployment
-
-### Terraform Init Fails
-
-```
-Error: Failed to get existing workspaces
-```
-
-**Fix:** Check S3 bucket exists and credentials have access:
-```bash
-aws s3 ls s3://your-bucket-name
-```
-
-### Terraform Apply Times Out
-
-**Cause:** Instance never becomes healthy.
-
-**Fix:**
-1. Check target group health in AWS Console
-2. Connect to instance via EC2 Instance Connect
-3. Check logs: `sudo cat /var/log/user-data.log`
-
-### 502 Bad Gateway After Deploy
-
-**Cause:** Instance not ready or app not running.
-
-**Fix:**
-1. Wait 3-5 minutes for health checks
-2. If still failing, check instance:
-   ```bash
-   sudo systemctl status nodeapp
-   curl http://127.0.0.1:3000/
-   ```
-
-### GitHub Actions Fails at AWS Credentials
-
-**Cause:** Missing or incorrect secrets.
-
-**Fix:** Verify all secrets are set correctly in GitHub:
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- `TF_STATE_BUCKET`
-
----
-
-## Quick Reference
-
-| Task | Command |
-|------|---------|
-| Initialize | `terraform init -backend-config=backend.hcl` |
-| Plan | `terraform plan -var="active_target=prod"` |
-| Deploy prod | `terraform apply -var="active_target=prod"` |
-| Switch to dev | `terraform apply -var="active_target=dev"` |
-| Rollback to prod | `terraform apply -var="active_target=prod"` |
-| Get URL | `terraform output app_url` |
-| Check State | `terraform show` |
-| Destroy | `terraform destroy -var="active_target=prod"` |
-
----
-
-## Next Steps
-
-After successful deployment:
-
-1. **Set up monitoring** - CloudWatch alarms for ALB and ASG
-2. **Configure HTTPS** - Add ACM certificate and HTTPS listener
-3. **Custom domain** - Create Route 53 alias record
-4. **Auto scaling policies** - Configure scaling based on CPU/traffic
-5. **CI/CD enhancements** - Add testing stages to workflow

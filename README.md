@@ -1,338 +1,161 @@
-# prod-dev Deployment with AWS ALB + Terraform
+# Blue/Green (prod/dev) Deployment with AWS ALB + Terraform
 
-Production-ready prod-dev deployment for a Node.js application using **AWS Application Load Balancer**, **Auto Scaling Groups**, **Terraform**, and **GitHub Actions**.
-
----
+Blue/green style deployment for a Node.js (Express) app using **AWS Application Load Balancer (ALB)**, **Auto Scaling Groups (ASG)**, **Terraform**, and a **GitHub Actions** workflow to switch between environments.
 
 ## Overview
 
 | Feature | Description |
-|---------|-------------|
-| **prod-dev** | Two identical environments (prod & dev); only one receives traffic at a time |
-| **Zero-downtime** | Switch traffic instantly by changing a single variable |
-| **Rollback** | Revert to previous environment in seconds |
-| **Infrastructure as Code** | All AWS resources managed via Terraform |
-| **CI/CD** | Deploy and switch via GitHub Actions workflow |
+|---|---|
+| **Two environments** | `prod` and `dev` exist together; only one receives traffic |
+| **Fast switch / rollback** | Change `active_target` and apply |
+| **IaC** | Networking, ALB, target groups, ASGs, launch templates via Terraform |
+| **CI/CD (optional)** | GitHub Actions `workflow_dispatch` to select `prod` or `dev` |
 
----
+## Architecture (Mermaid)
 
-## Architecture
+```mermaid
+flowchart LR
+  User[Users] -->|"HTTP:80"| ALB["ApplicationLoadBalancer (main-alb)"]
+  ALB --> Listener["Listener :80 (default forward)"]
 
-```
-                            ┌─────────────────────────────────────────────────────────────┐
-                            │                         AWS VPC                             │
-                            │                      10.0.0.0/16                            │
-                            │                                                             │
-    ┌──────────┐            │   ┌─────────────────────────────────────────────────────┐   │
-    │  Users   │────HTTP────│───│            Application Load Balancer                │   │
-    │ Internet │    :80     │   │                  (main-alb)                         │   │
-    └──────────┘            │   │              Security Group: alb-sg                 │   │
-                            │   └─────────────────────┬───────────────────────────────┘   │
-                            │                         │                                   │
-                            │              ┌──────────┴──────────┐                        │
-                            │              │      Listener       │                        │
-                            │              │    Port 80 HTTP     │                        │
-                            │              │                     │                        │
-                            │              │  active_target =    │                        │
-                            │              │   "prod" │ "dev"  │                        │
-                            │              └──────────┬──────────┘                        │
-                            │                         │                                   │
-                            │         ┌───────────────┴───────────────┐                   │
-                            │         ▼                               ▼                   │
-                            │  ┌─────────────┐                 ┌─────────────┐            │
-                            │  │  prod-tg    │                 │  dev-tg   │            │
-                            │  │  Port 3000  │                 │  Port 3000  │            │
-                            │  └──────┬──────┘                 └──────┬──────┘            │
-                            │         │                               │                   │
-                            │         ▼                               ▼                   │
-                            │  ┌─────────────┐                 ┌─────────────┐            │
-                            │  │  prod-asg   │                 │  dev-asg  │            │
-                            │  │ desired=1/0 │                 │ desired=0/1 │            │
-                            │  └──────┬──────┘                 └──────┬──────┘            │
-                            │         │                               │                   │
-                            │         ▼                               ▼                   │
-                            │  ┌─────────────┐                 ┌─────────────┐            │
-                            │  │    EC2      │                 │    EC2      │            │
-                            │  │ Node.js App │                 │ Node.js App │            │
-                            │  │   :3000     │                 │   :3000     │            │
-                            │  │  (prod)     │                 │  (dev)    │            │
-                            │  └─────────────┘                 └─────────────┘            │
-                            │                                                             │
-                            │  ┌─────────────┐     ┌─────────────┐                        │
-                            │  │ Subnet AZ-a │     │ Subnet AZ-b │                        │
-                            │  │ 10.0.1.0/24 │     │ 10.0.2.0/24 │                        │
-                            │  └─────────────┘     └─────────────┘                        │
-                            │                                                             │
-                            └─────────────────────────────────────────────────────────────┘
+  Listener -->|"active_target=prod"| TGprod["TargetGroup prod-tg :3000"]
+  Listener -->|"active_target=dev"| TGdev["TargetGroup dev-tg :3000"]
+
+  TGprod --> ASGprod["AutoScalingGroup prod-asg (desired=1 or 0)"]
+  TGdev --> ASGdev["AutoScalingGroup dev-asg (desired=1 or 0)"]
+
+  ASGprod --> EC2prod["EC2 instance(s) running Node app :3000"]
+  ASGdev --> EC2dev["EC2 instance(s) running Node app :3000"]
 ```
 
-### How It Works
+### How switching works
 
-1. **One apply creates both** prod and dev environments (target groups, ASGs, launch templates)
-2. **`active_target`** variable controls which environment is live:
-   - Listener forwards to the chosen target group
-   - Active ASG has `desired_capacity = 1`, inactive has `0`
-3. **Switch** by changing `active_target` and re-applying — traffic moves instantly
+- `terraform/listener.tf` forwards ALB traffic based on `active_target`.
+- `terraform/autoscaling.tf` scales:
+  - `prod-asg` to `1` when `active_target=prod` else `0`
+  - `dev-asg` to `1` when `active_target=dev` else `0`
 
----
+## App endpoints
 
-## Prerequisites
+The target group health check uses `/` (see `terraform/target-groups.tf`).
 
-| Requirement | Details |
-|-------------|---------|
-| **AWS Account** | With permissions for VPC, EC2, ALB, ASG, IAM |
-| **Terraform** | v1.6+ installed locally |
-| **AWS CLI** | Configured with credentials (`aws configure`) |
-| **S3 Bucket** | For Terraform state (required for GitHub Actions) |
-| **GitHub Secrets** | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `TF_STATE_BUCKET` |
+| Endpoint | Purpose |
+|---|---|
+| `/` | ALB health check (returns JSON) |
+| `/v2/health` | API health check (returns JSON) |
+| `/v2/hello` | Sample endpoint |
 
----
-
-## Project Structure
+## Project structure
 
 ```
 ├── .github/workflows/
-│   └── deploy.yaml              # GitHub Actions workflow (prod/dev choice)
+│   └── deploy.yaml              # workflow_dispatch: choose prod/dev
 ├── app/
-│   ├── prod/
-│   │   ├── app.js               # prod Node.js app (port 3000)
-│   │   └── package.json
-│   └── dev/
-│       ├── app.js               # dev Node.js app (port 3000)
-│       └── package.json
+│   ├── app.js                   # Express app (port 3000)
+│   └── package.json             # Express dependency + start script
 ├── terraform/
 │   ├── main.tf                  # VPC, IGW, subnets, security groups
-│   ├── alb.tf                   # Application Load Balancer
-│   ├── listener.tf              # Listener (forwards to prod or dev)
-│   ├── target-groups.tf         # prod-tg, dev-tg (port 3000)
-│   ├── autoscaling.tf           # prod-asg, dev-asg
-│   ├── launch-templates.tf      # EC2 config, user_data (Node.js setup)
-│   ├── variable.tf              # region, vpc_cidr, active_target
-│   ├── outputs.tf               # ALB DNS, app URL
+│   ├── alb.tf                   # ALB
+│   ├── listener.tf              # Listener (forwards based on active_target)
+│   ├── target-groups.tf         # prod/dev TGs (port 3000, health check /)
+│   ├── autoscaling.tf           # prod/dev ASGs (desired capacity toggled)
+│   ├── launch-templates.tf      # user_data installs Node + runs systemd service
+│   ├── variable.tf              # region, vpc_cidr, subnet_cidrs, active_target
+│   ├── outputs.tf               # alb_dns_name, app_url, active_target
 │   ├── provider.tf              # AWS provider
-│   └── backend.hcl.example      # S3 backend config template
-└── README.md                    # This file
+│   └── backend.hcl.example      # backend config template
+├── DEPLOYMENT_GUIDE.md
+└── README.md
 ```
 
----
+## Prerequisites
 
-## Deployment
+| Requirement | Notes |
+|---|---|
+| AWS account | VPC/EC2/ALB/ASG/S3 permissions |
+| Terraform | v1.6+ |
+| AWS CLI | `aws configure` set up |
+| S3 bucket | Terraform remote state (recommended; required for GitHub Actions) |
+| GitHub repo access from EC2 | If the repo is private, user-data `git clone` fails and targets will be unhealthy |
 
-### Step 1: Set Up S3 Backend (One-Time)
+### Branch behavior (important)
 
-Create an S3 bucket for Terraform state:
+Your EC2 instances download code at boot via `terraform/launch-templates.tf`:
+- **prod** instances clone branch `main`
+- **dev** instances clone branch `dev`
+
+If you push changes to `dev` but deploy prod, prod instances will still clone `main`.
+
+## Deploy (local)
+
+### 1) Create an S3 bucket for Terraform state (one-time)
 
 ```bash
-aws s3 mb s3://your-terraform-state-bucket --region us-east-1
+aws s3 mb s3://your-unique-bucket-name --region us-east-1
+aws s3api put-bucket-versioning --bucket your-unique-bucket-name --versioning-configuration Status=Enabled
 ```
 
-Create `terraform/backend.hcl` (do not commit):
-
-```hcl
-bucket = "your-terraform-state-bucket"
-key    = "prod-dev/terraform.tfstate"
-region = "us-east-1"
-```
-
-### Step 2: Initialize Terraform
+### 2) Terraform init
 
 ```bash
 cd terraform
-terraform init -backend-config=backend.hcl
+terraform init \
+  -backend-config="bucket=your-unique-bucket-name" \
+  -backend-config="key=prod-dev/terraform.tfstate" \
+  -backend-config="region=us-east-1"
 ```
 
-### Step 3: Deploy prod Environment (First Time)
+### 3) Deploy prod (or dev)
 
 ```bash
-terraform plan -var="active_target=prod"
-terraform apply -var="active_target=prod"
+terraform apply -auto-approve -var="active_target=prod"
 ```
 
-**What gets created:**
-- VPC with 2 public subnets (2 AZs)
-- Internet Gateway and route tables
-- Application Load Balancer
-- prod and dev target groups
-- prod and dev Auto Scaling Groups
-- prod ASG launches 1 instance, dev ASG has 0
-
-### Step 4: Access the Application
+Switch later:
 
 ```bash
-terraform output app_url
-# Output: http://main-alb-123456789.us-east-1.elb.amazonaws.com
+terraform apply -auto-approve -var="active_target=dev"
 ```
 
-Open the URL in your browser — you should see the **prod Environment** page.
-
----
-
-## Switching Environments
-
-### Switch to dev
+### 4) Get the ALB URL
 
 ```bash
-terraform apply -var="active_target=dev"
+terraform output -raw app_url
 ```
 
-**What happens:**
-- Listener forwards traffic to **dev-tg**
-- dev ASG scales to 1 instance
-- prod ASG scales to 0 instances
-- Open ALB URL → **dev Environment** page
+## GitHub Actions deployment
 
-### Switch Back to prod (Rollback)
+The workflow in `.github/workflows/deploy.yaml` runs Terraform with `active_target` set from the workflow input.
 
-```bash
-terraform apply -var="active_target=prod"
-```
+### Required secrets
 
-Traffic instantly moves back to prod.
-
----
-
-## GitHub Actions Deployment
-
-### Set Up Secrets
-
-In your GitHub repo: **Settings → Secrets and variables → Actions → New repository secret**
-
-| Secret | Value |
-|--------|-------|
-| `AWS_ACCESS_KEY_ID` | Your AWS access key |
-| `AWS_SECRET_ACCESS_KEY` | Your AWS secret key |
-| `TF_STATE_BUCKET` | Your S3 bucket name |
-| `AWS_REGION` | `us-east-1` (optional, defaults to us-east-1) |
-
-### Run Deployment
-
-1. Go to **Actions** → **prod-dev Deployment**
-2. Click **Run workflow**
-3. Select **prod** or **dev**
-4. Click **Run workflow**
-
-The workflow will:
-- Checkout code
-- Configure AWS credentials
-- Initialize Terraform with S3 backend
-- Plan and apply with selected `active_target`
-
----
-
-## Health Checks
-
-| Endpoint | Response |
-|----------|----------|
-| `/` | HTML page (prod or dev themed) |
-| `/health` | JSON: `{"status":"ok","environment":"prod\|dev","version":"1.0","timestamp":"..."}` |
-
-**Target group health check:** Path `/`, Port `3000`, HTTP, Success codes `200-299`
-
----
-
-## Outputs
-
-After `terraform apply`:
-
-```bash
-terraform output
-```
-
-| Output | Description |
-|--------|-------------|
-| `alb_dns_name` | ALB DNS name |
-| `app_url` | Full URL to access the app |
-| `active_target` | Currently active environment (prod/dev) |
-
----
+| Secret | Required | Notes |
+|---|---:|---|
+| `AWS_ACCESS_KEY_ID` | yes | IAM user access key |
+| `AWS_SECRET_ACCESS_KEY` | yes | IAM user secret key |
+| `AWS_REGION` | yes | used by `configure-aws-credentials` |
+| `TF_STATE_BUCKET` | yes | S3 bucket for Terraform state |
+| `TF_STATE_KEY` | no | defaults to `prod-dev/terraform.tfstate` |
 
 ## Troubleshooting
 
-### 502 Bad Gateway
+### 502 Bad Gateway / targets unhealthy
 
-**Cause:** No healthy instances in the target group.
+Usually means **no healthy targets**. Check target health in AWS Console, then on the instance:
 
-**Fix:**
-1. Check target group health: **EC2 → Target Groups → prod-tg → Targets**
-2. If unhealthy, connect to instance and check:
-   ```bash
-   sudo systemctl status nodeapp
-   sudo cat /var/log/user-data.log
-   curl http://127.0.0.1:3000/
-   ```
-3. If user_data failed, terminate the instance — ASG will launch a new one
+```bash
+sudo cat /var/log/user-data.log
+sudo systemctl status nodeapp --no-pager
+curl -sS http://127.0.0.1:3000/
+```
 
-### Instance Unhealthy in Target Group
+### `git clone` fails in user-data
 
-**Check:**
-1. App running: `sudo systemctl status nodeapp`
-2. Port listening: `sudo ss -tlnp | grep 3000`
-3. Local test: `curl http://127.0.0.1:3000/`
+If your repo is private (or the branch doesn’t exist), user-data can’t clone and the service never starts. Make the repo public or switch to an authenticated clone method.
 
-**Common causes:**
-- App not listening on `0.0.0.0` (fixed in user_data with `sed`)
-- File permissions (fixed with `chown`)
-- user_data failed (check `/var/log/user-data.log`)
-
-### Can't SSH to Instance
-
-Use **EC2 Instance Connect** (no PEM key needed):
-1. **EC2 → Instances** → Select instance
-2. **Connect** → **EC2 Instance Connect** → **Connect**
-
-Security group `app-sg` already allows port 22 from `0.0.0.0/0`.
-
-### Terraform State Issues
-
-Ensure you're using the same S3 backend:
-- Locally: `terraform init -backend-config=backend.hcl`
-- GitHub Actions: Uses `TF_STATE_BUCKET` secret
-
----
-
-## Clean Up
-
-To destroy all resources:
+## Clean up
 
 ```bash
 cd terraform
-terraform destroy -var="active_target=prod"
+terraform destroy -auto-approve -var="active_target=prod"
 ```
-
----
-
-## Configuration Reference
-
-### Variables (`terraform/variable.tf`)
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `region` | `us-east-1` | AWS region |
-| `vpc_cidr` | `10.0.0.0/16` | VPC CIDR block |
-| `subnet_cidrs` | `["10.0.1.0/24", "10.0.2.0/24"]` | Subnet CIDRs |
-| `active_target` | `prod` | Active environment (`prod` or `dev`) |
-
-### Security Groups
-
-| Name | Inbound | Purpose |
-|------|---------|---------|
-| `alb-sg` | 80 from 0.0.0.0/0 | ALB access from internet |
-| `app-sg` | 3000 from alb-sg, 22 from 0.0.0.0/0 | App + SSH access |
-
----
-
-## Summary
-
-| Action | Command |
-|--------|---------|
-| **Initialize** | `terraform init -backend-config=backend.hcl` |
-| **Deploy prod** | `terraform apply -var="active_target=prod"` |
-| **Switch to dev** | `terraform apply -var="active_target=dev"` |
-| **Rollback to prod** | `terraform apply -var="active_target=prod"` |
-| **Destroy** | `terraform destroy -var="active_target=prod"` |
-
----
-
-## License
-
-MIT
